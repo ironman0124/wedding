@@ -215,8 +215,8 @@ function toggleSidebar() {
 // ── DASHBOARD ─────────────────────────────────────────────────
 function renderDashboard() {
   const tabs = [
-    { key:'pithi',   label:'🌿 Pithi (Haldi) Day', color:'teal',   eventName:'Pithi' },
-    { key:'saatak',  label:'🪔 Saatak Day',         color:'purple', eventName:'Saatak' },
+    { key:'pithi',   label:'🌿 Pithi Day',          color:'teal',   eventName:'Pithi' },
+    { key:'saatak',  label:'🪔 Saatak Day',         color:'purple', eventName:'Sataak' },
     { key:'wedding', label:'💍 Wedding Day', color:'red',    eventName:'Wedding' },
   ];
 
