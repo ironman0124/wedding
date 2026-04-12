@@ -52,10 +52,7 @@ let state = {
 
 // ── API ───────────────────────────────────────────────────────
 async function apiGet(action = 'all') {
-  if (SCRIPT_URL === 'YOUR_APPS_SCRIPT_URL_HERE') {
-    showBanner('⚠️ Apps Script not connected yet — showing offline data. See setup instructions.', 'warning');
-    return null;
-  }
+  // Apps Script URL is configured
   try {
     const res = await fetch(`${SCRIPT_URL}?action=${action}`, { method: 'GET' });
     const json = await res.json();
@@ -68,7 +65,7 @@ async function apiGet(action = 'all') {
 }
 
 async function apiPost(payload) {
-  if (SCRIPT_URL === 'YOUR_APPS_SCRIPT_URL_HERE') return null;
+  // Apps Script URL is configured
   try {
     const res = await fetch(SCRIPT_URL, {
       method: 'POST',
@@ -86,8 +83,8 @@ async function initApp() {
   showLoadingOverlay(true);
   const data = await apiGet('all');
   if (data) {
-    state.pithi    = data.pithi    || [];
-    state.saatak   = data.saatak   || [];
+	state.pithi    = data.pithi    || [];
+	state.saatak   = data.saatak    || [];
     state.wedding  = data.wedding  || [];
     state.events   = data.events   || [];
     state.tasks    = data.tasks    || [];
@@ -95,8 +92,8 @@ async function initApp() {
     showBanner('✅ Synced with Google Sheets', 'success', 3000);
   } else {
     // fallback to localStorage
-    state.pithi    = JSON.parse(localStorage.getItem('wpa_pithi')    || '[]');
-    state.saatak   = JSON.parse(localStorage.getItem('wpa_saatak')   || '[]');
+	state.pithi    = JSON.parse(localStorage.getItem('wpa_pithi')    || '[]');
+	state.saatak   = JSON.parse(localStorage.getItem('wpa_saatak')   || '[]');
     state.wedding  = JSON.parse(localStorage.getItem('wpa_wedding')  || '[]');
     state.events   = JSON.parse(localStorage.getItem('wpa_events')   || '[]');
     state.tasks    = JSON.parse(localStorage.getItem('wpa_tasks')    || '[]');
@@ -129,6 +126,54 @@ function formatDate(d) {
   if (!d) return 'TBD';
   try { return new Date(d).toLocaleDateString('en-ZA',{weekday:'short',day:'numeric',month:'short',year:'numeric'}); }
   catch(e) { return d; }
+}
+function formatTime(t) {
+  if (!t) return '';
+  var s = String(t).trim();
+
+  // Case 1: Full JS Date.toString() e.g. "Sat Dec 30 1899 11:00:00 GMT+0200 (SAST)"
+  // Extract the TIME PART directly from the string (local time as shown)
+  // Format: "DayName Mon DD YYYY HH:MM:SS GMToffset (TZname)"
+  var gmtMatch = s.match(/\d{4}\s+(\d{1,2}):(\d{2}):(\d{2})\s+GMT/);
+  if (gmtMatch) {
+    var h   = parseInt(gmtMatch[1], 10);
+    var m   = gmtMatch[2];
+    var sec = gmtMatch[3];
+    var ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12 || 12;
+    return h + ':' + m + ':' + sec + ' ' + ampm;
+  }
+
+  // Case 2: ISO datetime string e.g. "1899-12-30T09:00:00.000Z"
+  // Here we must NOT use UTC — the UTC hours are wrong due to timezone
+  // Instead skip this and let Code.gs send plain strings via Session.getScriptTimeZone()
+  if (s.indexOf('T') !== -1 && s.indexOf('Z') !== -1) {
+    // Parse as ISO and use UTC hours (this is what Code.gs 'UTC' format gives)
+    // BUT since this may be wrong timezone, just extract the time digits
+    var tPart = s.split('T')[1] || '';
+    var isoMatch = tPart.match(/^(\d{2}):(\d{2}):(\d{2})/);
+    if (isoMatch) {
+      var h   = parseInt(isoMatch[1], 10);
+      var m   = isoMatch[2];
+      var sec = isoMatch[3];
+      var ampm = h >= 12 ? 'PM' : 'AM';
+      h = h % 12 || 12;
+      return h + ':' + m + ':' + sec + ' ' + ampm;
+    }
+  }
+
+  // Case 3: Plain HH:MM or HH:MM:SS string e.g. "11:00:00" or "11:00"
+  var plainMatch = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (plainMatch) {
+    var h   = parseInt(plainMatch[1], 10);
+    var m   = plainMatch[2];
+    var sec = plainMatch[3] || '00';
+    var ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12 || 12;
+    return h + ':' + m + ':' + sec + ' ' + ampm;
+  }
+
+  return s;
 }
 function guestList(tab) { return state[tab] || []; }
 
@@ -170,9 +215,9 @@ function toggleSidebar() {
 // ── DASHBOARD ─────────────────────────────────────────────────
 function renderDashboard() {
   const tabs = [
-    { key:'pithi',   label:'🌿 Pithi (Haldi) Day', color:'teal',   evIdx:1 },
-    { key:'saatak',  label:'🪔 Saatak Day',         color:'purple', evIdx:3 },
-    { key:'wedding', label:'💍 Wedding Day',        color:'red',    evIdx:5 },
+    { key:'pithi',   label:'🌿 Pithi (Haldi) Day', color:'teal',   eventName:'Pithi' },
+    { key:'saatak',  label:'🪔 Saatak Day',         color:'purple', eventName:'Saatak' },
+    { key:'wedding', label:'💍 Wedding Day', color:'red',    eventName:'Wedding' },
   ];
 
   let html = '';
@@ -184,13 +229,14 @@ function renderDashboard() {
     const declined  = guests.filter(g => g.rsvp === 'No').length;
     const optional  = guests.filter(g => g.rsvp === 'Optional').length;
     const invites   = guests.filter(g => g.invite === 'Yes').length;
-    const ev = state.events[t.evIdx] || {};
-    const dateStr = ev.date ? formatDate(ev.date) + (ev.time ? ' · ' + ev.time : '') + (ev.venue ? ' · ' + ev.venue : '') : 'Date TBD — add in Events & Functions tab';
+    // Match event by name (case-insensitive partial match)
+    const ev = state.events.find(e => e.name && e.name.toLowerCase().includes(t.eventName.toLowerCase())) || {};
+    const dateStr = ev.date ? formatDate(ev.date) + (ev.time ? ' · ' + formatTime(ev.time) : '') + (ev.venue ? ' · ' + ev.venue : '') : 'Date TBD — add in Events & Functions tab';
 
     html += `
     <div class="dash-event-block ${t.color}">
-      <div class="dash-event-title">${t.label}</div>
-      <div class="dash-event-date">📅 ${dateStr}</div>
+      <div class="dash-event-title" style="text-align:center;">${t.label}</div>
+      <div class="dash-event-date" style="text-align:center;">📅 ${dateStr}</div>
       <div class="dash-event-stats">
         <div class="dash-stat"><div class="ds-label">TOTAL</div><div class="ds-val">${total}</div></div>
         <div class="dash-stat"><div class="ds-label">CONFIRMED ✓</div><div class="ds-val green">${confirmed}</div></div>
@@ -202,13 +248,16 @@ function renderDashboard() {
     </div>`;
   });
 
-  // Tasks & Budget
+  // Tasks & Expenses
   const tasksDone    = state.tasks.filter(t => t.done || t.status === 'Done').length;
   const tasksPending = state.tasks.filter(t => !t.done && t.status !== 'Done').length;
-  const totalBudget  = state.expenses.reduce((a, e) => a + Number(e.budget||0), 0);
-  const totalActual  = state.expenses.reduce((a, e) => a + Number(e.actual||0), 0);
-  const paid         = state.expenses.filter(e=>e.status==='Paid').reduce((a,e)=>a+Number(e.actual||0),0);
   const pct          = state.tasks.length ? Math.round(tasksDone / state.tasks.length * 100) : 0;
+  // Filter out TOTAL summary row — only count real expense entries
+  const validExp     = state.expenses.filter(e => e.name && String(e.name).toUpperCase() !== 'TOTAL' && e.cat);
+  // Nalishka sheet: budget=Total(R), actual=Paid(R), diff=Balance(R)
+  const totalR       = validExp.reduce((a, e) => a + Number(e.budget||0), 0);
+  const paidR        = validExp.reduce((a, e) => a + Number(e.actual||0), 0);
+  const balanceR     = validExp.reduce((a, e) => a + Number(e.diff||0),   0);
 
   html += `
   <div class="dash-row-2">
@@ -222,12 +271,11 @@ function renderDashboard() {
       </div>
     </div>
     <div class="dash-card">
-      <div class="card-title">💰 BUDGET (ZAR)</div>
+      <div class="card-title">💰 EXPENSES (ZAR)</div>
       <div class="dash-event-stats">
-        <div class="dash-stat"><div class="ds-label">BUDGETED</div><div class="ds-val gold">R ${fmt(totalBudget)}</div></div>
-        <div class="dash-stat"><div class="ds-label">ACTUAL</div><div class="ds-val red">R ${fmt(totalActual)}</div></div>
-        <div class="dash-stat"><div class="ds-label">PAID ✓</div><div class="ds-val green">R ${fmt(paid)}</div></div>
-        <div class="dash-stat"><div class="ds-label">OUTSTANDING</div><div class="ds-val orange">R ${fmt(totalBudget - paid)}</div></div>
+        <div class="dash-stat"><div class="ds-label">TOTAL (R)</div><div class="ds-val gold">R ${fmt(totalR)}</div></div>
+        <div class="dash-stat"><div class="ds-label">PAID (R)</div><div class="ds-val green">R ${fmt(paidR)}</div></div>
+        <div class="dash-stat"><div class="ds-label">BALANCE (R)</div><div class="ds-val orange">R ${fmt(balanceR)}</div></div>
       </div>
     </div>
   </div>`;
@@ -258,18 +306,36 @@ function renderGuestList(tab) {
   document.getElementById('guest-tbody').innerHTML = list.map(g => `
     <tr>
       <td style="color:var(--text-muted);font-size:12px;">${g.no||''}</td>
-      <td><strong>${g.name||''}</strong> <span style="color:var(--text-muted)">${g.surname||''}</span></td>
+      <td style="font-weight:400;font-family:var(--font-body);">${g.name||''} <span style="color:var(--text-muted);font-size:12px;">${g.surname||''}</span></td>
       <td style="color:var(--text-muted);font-size:12px;">${g.group||''}</td>
       <td style="color:var(--text-muted);">${g.table||'–'}</td>
       <td>${rsvpBadge(g.rsvp)}</td>
       <td><span class="badge ${g.invite==='Yes'?'badge-yes':'badge-no'}">${g.invite||'No'}</span></td>
       <td style="color:var(--text-muted);font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${g.notes||''}</td>
-      <td><button class="btn-icon" onclick="editGuest('${tab}',${g.row})">✎</button></td>
+      <td style="display:flex;gap:4px;">
+        <button class="btn-icon" onclick="editGuest('${tab}',${g.row})" title="Edit">✎</button>
+        <button class="btn-icon" style="color:var(--red);" onclick="deleteGuest('${tab}',${g.row})" title="Delete">🗑</button>
+      </td>
     </tr>`).join('') || `<tr><td colspan="8" class="empty-state">No guests found</td></tr>`;
 
   document.getElementById('guest-count').textContent = `Showing ${list.length} of ${guestList(tab).length} guests`;
 }
 
+
+async function deleteGuest(tab, row) {
+  if (!confirm('Remove this guest from the list?')) return;
+  showBanner('🗑 Deleting guest…', 'info');
+  const res = await apiPost({ action: 'deleteGuest', sheet: tab, row });
+  if (res && res.status === 'ok') {
+    state[tab] = state[tab].filter(g => g.row !== row);
+    saveLocal();
+    renderGuestList(tab);
+    renderDashboard();
+    showBanner('✅ Guest deleted!', 'success', 3000);
+  } else {
+    showBanner('⚠️ Could not delete guest', 'error', 4000);
+  }
+}
 function editGuest(tab, row) {
   const g = guestList(tab).find(x => x.row === row);
   if (!g) return;
@@ -280,7 +346,6 @@ function editGuest(tab, row) {
   document.getElementById('g-table').value   = g.table || '';
   document.getElementById('g-rsvp').value    = g.rsvp || 'Pending';
   document.getElementById('g-invite').value  = g.invite || 'No';
-  document.getElementById('g-diet').value    = g.diet || '';
   document.getElementById('g-contact').value = g.contact || '';
   document.getElementById('g-notes').value   = g.notes || '';
   window._editGuestTab = tab;
@@ -290,7 +355,7 @@ function editGuest(tab, row) {
 
 function openAddGuest() {
   document.getElementById('g-modal-title').textContent = 'Add Guest';
-  ['g-name','g-surname','g-table','g-diet','g-contact','g-notes'].forEach(id => {
+  ['g-name','g-surname','g-table','g-contact','g-notes'].forEach(id => {
     const el = document.getElementById(id); if(el) el.value='';
   });
   document.getElementById('g-group').value  = 'Family';
@@ -309,29 +374,33 @@ async function saveGuest() {
     table:   document.getElementById('g-table').value,
     rsvp:    document.getElementById('g-rsvp').value,
     invite:  document.getElementById('g-invite').value,
-    diet:    document.getElementById('g-diet').value.trim(),
     contact: document.getElementById('g-contact').value.trim(),
     notes:   document.getElementById('g-notes').value.trim(),
   };
   if (!data.name) return;
 
+  // Capture BEFORE closeModal resets them
+  const tab = window._editGuestTab || currentGuestTab;
+  const row = window._editGuestRow;
+  window._editGuestTab = null;
+  window._editGuestRow = null;
   closeModal('modal-guest');
   showBanner('💾 Saving to Google Sheets…', 'info');
 
-  const tab = window._editGuestTab || currentGuestTab;
-  const row = window._editGuestRow;
-
   if (row) {
-    // Update existing
+    // Update existing — send full row including name, surname, group
     const res = await apiPost({
       action: 'updateGuestRSVP', sheet: tab, row,
-      rsvp: data.rsvp, invite: data.invite, table: data.table,
-      diet: data.diet, contact: data.contact, notes: data.notes
+      name: data.name, surname: data.surname, group: data.group,
+      table: data.table, rsvp: data.rsvp, invite: data.invite,
+      contact: data.contact, notes: data.notes
     });
     if (res && res.status === 'ok') {
       const g = state[tab].find(x => x.row === row);
       if (g) Object.assign(g, data);
       showBanner('✅ Saved to Google Sheets!', 'success', 3000);
+    } else {
+      showBanner('⚠️ Could not save to Google Sheets', 'error', 4000);
     }
   } else {
     // Add new
@@ -341,7 +410,7 @@ async function saveGuest() {
       const fresh = await apiGet('guests');
       if (fresh) {
         state.pithi   = fresh.pithi   || state.pithi;
-        state.saatak  = fresh.saatak  || state.saatak;
+		state.saatak  = fresh.saatak  || state.saatak;
         state.wedding = fresh.wedding || state.wedding;
       }
       showBanner('✅ Guest added to Google Sheets!', 'success', 3000);
@@ -357,23 +426,78 @@ async function saveGuest() {
 
 // ── EVENTS ────────────────────────────────────────────────────
 function renderEvents() {
-  document.getElementById('events-list').innerHTML = state.events.map(e => `
+  // Sort chronologically — events with dates first (ascending), then TBD events
+  const sortedEvents = [...state.events].sort((a, b) => {
+    if (a.date && b.date) return new Date(a.date) - new Date(b.date);
+    if (a.date && !b.date) return -1;
+    if (!a.date && b.date) return 1;
+    return 0;
+  });
+  document.getElementById('events-list').innerHTML = sortedEvents.map(e => `
     <div class="event-card">
       <div>
         <div class="event-card-name">${e.name}</div>
-        <div class="event-card-meta">${formatDate(e.date)}${e.time?' · '+e.time:''}${e.venue?' · '+e.venue:''}</div>
+        <div class="event-card-meta">${formatDate(e.date)}${e.time?' · '+formatTime(e.time):''}${e.venue?' · '+e.venue:''}</div>
         ${e.notes?`<div class="event-card-meta" style="margin-top:4px;">${e.notes}</div>`:''}
       </div>
-      <button class="btn-icon" onclick="editEvent(${e.row})">✎</button>
+      <div style="display:flex;gap:6px;flex-shrink:0;">
+        <button class="btn-icon" onclick="editEvent(${e.row})" title="Edit">✎</button>
+        <button class="btn-icon" style="color:var(--red);" onclick="deleteEvent(${e.row})" title="Delete">🗑</button>
+      </div>
     </div>`).join('') || `<div class="empty-state">No events yet</div>`;
 }
 
+
+async function deleteEvent(row) {
+  if (!confirm('Remove this event?')) return;
+  showBanner('🗑 Deleting event…', 'info');
+  const res = await apiPost({ action: 'deleteEvent', row });
+  if (res && res.status === 'ok') {
+    state.events = state.events.filter(e => e.row !== row);
+    saveLocal();
+    renderEvents();
+    renderDashboard();
+    showBanner('✅ Event deleted!', 'success', 3000);
+  } else {
+    showBanner('⚠️ Could not delete event', 'error', 4000);
+  }
+}
 function editEvent(row) {
   const e = state.events.find(x => x.row === row);
   if (!e) return;
+  // Ensure date is in yyyy-MM-dd format for the date input
+  let dateVal = '';
+  if (e.date) {
+    try {
+      const d = new Date(e.date);
+      if (!isNaN(d)) {
+        dateVal = d.toISOString().split('T')[0];
+      } else {
+        dateVal = e.date;
+      }
+    } catch(_) { dateVal = e.date; }
+  }
+  // Clean time for the text input — extract HH:MM:SS
+  let timeVal = '';
+  if (e.time) {
+    const t = String(e.time);
+    // Case 1: Full Date.toString() — extract the time digits shown in the string
+    // e.g. "Sat Dec 30 1899 11:00:00 GMT+0200" -> "11:00:00"
+    const gmtM = t.match(/\d{4}\s+(\d{1,2}):(\d{2}):(\d{2})\s+GMT/);
+    if (gmtM) {
+      timeVal = gmtM[1].padStart(2,'0') + ':' + gmtM[2] + ':' + gmtM[3];
+    } else if (t.indexOf('T') !== -1) {
+      // Case 2: ISO string — extract time part directly
+      const tPart = (t.split('T')[1] || '').replace('Z','').replace('.000','');
+      timeVal = tPart.substring(0,8);
+    } else {
+      // Case 3: Plain string already
+      timeVal = t.substring(0,8);
+    }
+  }
   document.getElementById('ev-name').value  = e.name  || '';
-  document.getElementById('ev-date').value  = e.date  || '';
-  document.getElementById('ev-time').value  = e.time  || '';
+  document.getElementById('ev-date').value  = dateVal;
+  document.getElementById('ev-time').value  = timeVal;
   document.getElementById('ev-venue').value = e.venue || '';
   document.getElementById('ev-notes').value = e.notes || '';
   window._editEventRow = row;
@@ -398,16 +522,20 @@ async function saveEvent() {
     status:'Upcoming'
   };
   if (!data.name) return;
+  const row = window._editEventRow;  // capture BEFORE closeModal resets it
+  window._editEventRow = null;
   closeModal('modal-event');
   showBanner('💾 Saving to Google Sheets…', 'info');
-
-  const row = window._editEventRow;
   let res;
   if (row) {
     res = await apiPost({ action: 'updateEvent', row, data });
     if (res && res.status === 'ok') {
       const e = state.events.find(x => x.row === row);
       if (e) Object.assign(e, data);
+      saveLocal(); renderEvents(); renderDashboard();
+      showBanner('✅ Event updated!', 'success', 3000);
+    } else {
+      showBanner('⚠️ Could not update event', 'error', 4000);
     }
   } else {
     res = await apiPost({ action: 'addEvent', data });
@@ -431,18 +559,39 @@ function renderTasks() {
   const list = state.tasks.filter(t =>
     (!sf || (sf==='Done' ? (t.done||t.status==='Done') : (!t.done && t.status!=='Done'))) &&
     (!cf || t.cat === cf)
-  );
+  ).sort((a, b) => {
+    const aDone = a.done || a.status === 'Done';
+    const bDone = b.done || b.status === 'Done';
+    // Done tasks always go to the bottom
+    if (aDone && !bDone) return 1;
+    if (!aDone && bDone) return -1;
+    // Sort by due date ascending — tasks without due date go last
+    const aDate = a.due ? new Date(a.due) : null;
+    const bDate = b.due ? new Date(b.due) : null;
+    if (aDate && bDate) return aDate - bDate;
+    if (aDate && !bDate) return -1;
+    if (!aDate && bDate) return 1;
+    return 0;
+  });
 
   document.getElementById('task-list').innerHTML = list.map(t => {
     const done = t.done || t.status === 'Done';
     return `
     <div class="task-item" style="background:var(--dark2);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:0.5rem;padding:0.9rem 1rem;">
-      <div class="task-check ${done?'done':''}" onclick="toggleTask(${t.row})">${done?'✓':''}</div>
+      <div class="task-check ${done?'done':''}" onclick="toggleTask(${t.row})" title="${done?'Mark pending':'Mark done'}">${done?'✓':''}</div>
       <div style="flex:1;">
-        <div class="task-text ${done?'done':''}">${t.text}</div>
-        <div class="task-meta">${t.cat||''}${t.assign?' · '+t.assign:''}${t.due?' · Due '+formatDate(t.due):''}</div>
+        <div class="task-text ${done?'done':''}" style="font-weight:400;">${t.text}</div>
+        <div class="task-meta" style="margin-top:3px;">
+          <span style="color:var(--gold);font-size:11px;">${t.cat||''}</span>
+          ${t.assign?`<span style="color:var(--text-muted);font-size:11px;"> · ${t.assign}</span>`:''}
+          ${t.due?`<span style="color:var(--text-muted);font-size:11px;"> · Due ${formatDate(t.due)}</span>`:''}
+          <span style="margin-left:4px;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600;background:${done?'rgba(39,174,96,0.2)':'rgba(230,126,34,0.2)'};color:${done?'#27AE60':'#E67E22'};">${t.status||'Pending'}</span>
+        </div>
       </div>
-      <button class="btn-icon" style="color:var(--red-dark);" onclick="deleteTaskLocal(${t.row})">✕</button>
+      <div style="display:flex;gap:4px;flex-shrink:0;">
+        <button class="btn-icon" onclick="openEditTask(${t.row})" title="Edit">✎</button>
+        <button class="btn-icon" style="color:var(--red);" onclick="deleteTask(${t.row})" title="Delete">🗑</button>
+      </div>
     </div>`;
   }).join('') || `<div class="empty-state">No tasks found 🎉</div>`;
 }
@@ -455,19 +604,47 @@ async function toggleTask(row) {
   saveLocal();
   renderTasks();
   renderDashboard();
-  await apiPost({ action: 'updateTask', row, data: t });
+  const res = await apiPost({ action: 'updateTask', row, data: t });
+  if (res && res.status === 'ok') {
+    showBanner('✅ Task updated!', 'success', 2000);
+  }
 }
 
-function deleteTaskLocal(row) {
-  state.tasks = state.tasks.filter(t => t.row !== row);
-  saveLocal(); renderTasks(); renderDashboard();
+async function deleteTask(row) {
+  if (!confirm('Delete this task?')) return;
+  showBanner('🗑 Deleting task…', 'info');
+  const res = await apiPost({ action: 'deleteTask', row });
+  if (res && res.status === 'ok') {
+    state.tasks = state.tasks.filter(t => t.row !== row);
+    saveLocal(); renderTasks(); renderDashboard();
+    showBanner('✅ Task deleted!', 'success', 3000);
+  } else {
+    showBanner('⚠️ Could not delete task', 'error', 4000);
+  }
 }
 
 function openAddTask() {
-  ['t-text','t-assign','t-due'].forEach(id => {
+  ['t-text','t-assign','t-due','t-notes'].forEach(id => {
     const el = document.getElementById(id); if(el) el.value='';
   });
-  document.getElementById('t-cat').value = 'Other';
+  document.getElementById('t-cat').value    = 'Other';
+  document.getElementById('t-status').value = 'Pending';
+  window._editTaskRow = null;
+  document.getElementById('task-modal-title').textContent = 'Add Task';
+  openModal('modal-task');
+}
+
+function openEditTask(row) {
+  const t = state.tasks.find(x => x.row === row);
+  if (!t) return;
+  document.getElementById('t-text').value   = t.text   || '';
+  document.getElementById('t-cat').value    = t.cat    || 'Other';
+  document.getElementById('t-assign').value = t.assign || '';
+  document.getElementById('t-due').value    = t.due    || '';
+  document.getElementById('t-status').value = t.status || 'Pending';
+  document.getElementById('t-notes').value  = t.notes  || '';
+  window._editTaskRow = row;
+  document.getElementById('task-modal-title').textContent = 'Edit Task';
   openModal('modal-task');
 }
 
@@ -477,50 +654,84 @@ async function saveTask() {
     cat:    document.getElementById('t-cat').value,
     assign: document.getElementById('t-assign').value.trim(),
     due:    document.getElementById('t-due').value,
-    status: 'Pending', notes: ''
+    status: document.getElementById('t-status').value || 'Pending',
+    notes:  (document.getElementById('t-notes') ? document.getElementById('t-notes').value.trim() : '')
   };
   if (!data.text) return;
+  const row = window._editTaskRow;  // capture BEFORE closeModal resets it
+  window._editTaskRow = null;
   closeModal('modal-task');
   showBanner('💾 Saving task…', 'info');
-  const res = await apiPost({ action: 'addTask', data });
-  if (res && res.status === 'ok') {
-    const fresh = await apiGet('tasks');
-    if (fresh) state.tasks = fresh.tasks || state.tasks;
-    showBanner('✅ Task saved!', 'success', 3000);
+  if (row) {
+    // Update existing task
+    const res = await apiPost({ action: 'updateTask', row, data });
+    if (res && res.status === 'ok') {
+      const t = state.tasks.find(x => x.row === row);
+      if (t) Object.assign(t, data, { done: data.status === 'Done' });
+      showBanner('✅ Task updated!', 'success', 3000);
+    } else {
+      showBanner('⚠️ Could not update task', 'error', 4000);
+    }
   } else {
-    state.tasks.push({ ...data, row: Date.now(), done: false });
+    // Add new task
+    const res = await apiPost({ action: 'addTask', data });
+    if (res && res.status === 'ok') {
+      const fresh = await apiGet('tasks');
+      if (fresh) state.tasks = fresh.tasks || state.tasks;
+      showBanner('✅ Task saved!', 'success', 3000);
+    } else {
+      state.tasks.push({ ...data, row: Date.now(), done: false });
+    }
   }
   saveLocal(); renderTasks(); renderDashboard();
 }
 
 // ── EXPENSES ──────────────────────────────────────────────────
 function renderExpenses() {
-  const totalB = state.expenses.reduce((a,e)=>a+Number(e.budget||0),0);
-  const totalA = state.expenses.reduce((a,e)=>a+Number(e.actual||0),0);
-  const paid   = state.expenses.filter(e=>e.status==='Paid').reduce((a,e)=>a+Number(e.actual||0),0);
+  // Filter out TOTAL summary row and blank rows
+  const validExp = state.expenses.filter(e => e.name && String(e.name).toUpperCase() !== 'TOTAL' && e.cat);
+  // Nalishka sheet: budget=Total(R), actual=Paid(R), diff=Balance(R)
+  const totalR   = validExp.reduce((a,e) => a + Number(e.budget||0), 0);
+  const paidR    = validExp.reduce((a,e) => a + Number(e.actual||0), 0);
+  const balanceR = validExp.reduce((a,e) => a + Number(e.diff||0),   0);
 
   document.getElementById('expense-stats').innerHTML = `
-    <div class="stat-card gold"><div class="stat-label">BUDGETED</div><div class="stat-value" style="font-size:1.3rem;">R ${fmt(totalB)}</div></div>
-    <div class="stat-card green"><div class="stat-label">ACTUAL</div><div class="stat-value" style="font-size:1.3rem;">R ${fmt(totalA)}</div></div>
-    <div class="stat-card green"><div class="stat-label">PAID</div><div class="stat-value" style="font-size:1.3rem;">R ${fmt(paid)}</div></div>
-    <div class="stat-card orange"><div class="stat-label">OUTSTANDING</div><div class="stat-value" style="font-size:1.3rem;">R ${fmt(totalB-paid)}</div></div>`;
+    <div class="stat-card gold"><div class="stat-label">TOTAL (R)</div><div class="stat-value" style="font-size:1.3rem;">R ${fmt(totalR)}</div></div>
+    <div class="stat-card green"><div class="stat-label">PAID (R)</div><div class="stat-value" style="font-size:1.3rem;">R ${fmt(paidR)}</div></div>
+    <div class="stat-card orange"><div class="stat-label">BALANCE (R)</div><div class="stat-value" style="font-size:1.3rem;">R ${fmt(balanceR)}</div></div>`;
 
-  document.getElementById('expense-tbody').innerHTML = state.expenses.map((e,i) => {
-    const diff = Number(e.budget||0) - Number(e.actual||0);
+  document.getElementById('expense-tbody').innerHTML = validExp.map((e,i) => {
+    const balColor = Number(e.diff||0) > 0 ? '#E67E22' : '#27AE60';
     const st = e.status==='Paid'?'badge-yes': e.status==='Deposit Paid'?'badge-deposit':'badge-pending';
     return `<tr>
       <td style="color:var(--text-muted);font-size:12px;">${i+1}</td>
-      <td><strong>${e.name}</strong></td>
+      <td style="font-weight:400;">${e.name}</td>
       <td style="font-size:12px;color:var(--text-muted);">${e.cat}</td>
       <td style="color:var(--gold);">R ${fmt(e.budget)}</td>
-      <td>R ${fmt(e.actual)}</td>
-      <td style="color:${diff>=0?'#27AE60':'#C0392B'};font-weight:600;">R ${fmt(Math.abs(diff))} ${diff<0?'▲':'▼'}</td>
+      <td style="color:#27AE60;">R ${fmt(e.actual)}</td>
+      <td style="color:${balColor};font-weight:600;">R ${fmt(e.diff)}</td>
       <td><span class="badge ${st}">${e.status}</span></td>
-      <td><button class="btn-icon" onclick="editExpense(${e.row})">✎</button></td>
+      <td style="display:flex;gap:4px;">
+        <button class="btn-icon" onclick="editExpense(${e.row})" title="Edit">✎</button>
+        <button class="btn-icon" style="color:var(--red);" onclick="deleteExpense(${e.row})" title="Delete">🗑</button>
+      </td>
     </tr>`;
   }).join('') || `<tr><td colspan="8" class="empty-state">No expenses yet</td></tr>`;
 }
 
+
+async function deleteExpense(row) {
+  if (!confirm('Delete this expense?')) return;
+  showBanner('🗑 Deleting expense…', 'info');
+  const res = await apiPost({ action: 'deleteExpense', row });
+  if (res && res.status === 'ok') {
+    state.expenses = state.expenses.filter(e => e.row !== row);
+    saveLocal(); renderExpenses(); renderDashboard();
+    showBanner('✅ Expense deleted!', 'success', 3000);
+  } else {
+    showBanner('⚠️ Could not delete expense', 'error', 4000);
+  }
+}
 function editExpense(row) {
   const e = state.expenses.find(x => x.row === row);
   if (!e) return;
@@ -554,16 +765,22 @@ async function saveExpense() {
     notes:  document.getElementById('ex-notes').value.trim(),
   };
   if (!data.name) return;
+  const row = window._editExpenseRow;  // capture BEFORE closeModal resets it
+  window._editExpenseRow = null;
   closeModal('modal-expense');
   showBanner('💾 Saving expense…', 'info');
-
-  const row = window._editExpenseRow;
   let res;
   if (row) {
     res = await apiPost({ action: 'updateExpense', row, data });
     if (res && res.status === 'ok') {
       const e = state.expenses.find(x => x.row === row);
       if (e) Object.assign(e, data);
+      saveLocal(); renderExpenses(); renderDashboard();
+      showBanner('✅ Expense updated!', 'success', 3000);
+      return;
+    } else {
+      showBanner('⚠️ Could not update expense', 'error', 4000);
+      return;
     }
   } else {
     res = await apiPost({ action: 'addExpense', data });
@@ -582,8 +799,11 @@ async function saveExpense() {
 function openModal(id)  { document.getElementById(id).classList.add('open'); }
 function closeModal(id) {
   document.getElementById(id).classList.remove('open');
-  window._editEventRow = null;
-  window._editExpenseRow = null;
+  window._editEventRow    = null;
+  window._editExpenseRow  = null;
+  window._editTaskRow     = null;
+  window._editGuestRow    = null;
+  window._editGuestTab    = null;
 }
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') document.querySelectorAll('.modal-overlay.open').forEach(m => m.classList.remove('open'));
@@ -596,7 +816,7 @@ async function manualSync() {
   const data = await apiGet('all');
   if (data) {
     state.pithi    = data.pithi    || state.pithi;
-    state.saatak   = data.saatak   || state.saatak;
+	state.saatak   = data.saatak   || state.saatak;
     state.wedding  = data.wedding  || state.wedding;
     state.events   = data.events   || state.events;
     state.tasks    = data.tasks    || state.tasks;
