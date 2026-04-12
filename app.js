@@ -216,7 +216,7 @@ function toggleSidebar() {
 function renderDashboard() {
   const tabs = [
     { key:'pithi',   label:'🌿 Pithi Day',          color:'teal',   eventName:'Pithi' },
-    { key:'saatak',  label:'🪔 Saatak Day',         color:'purple', eventName:'Sataak' },
+    { key:'saatak',  label:'🪔 Saatak Day',         color:'purple', eventName:'Saatak' },
     { key:'wedding', label:'💍 Wedding Day', color:'red',    eventName:'Wedding' },
   ];
 
